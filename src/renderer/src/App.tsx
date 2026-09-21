@@ -7,44 +7,29 @@ function App() {
   const [timerState, setTimerState] = useState<TimerState>('idle');
   const [time, setTime] = useState<number>(0);
   
-  // Refs preserve values without triggering React re-renders
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
 
-  // 1. Keyboard Event Listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
         e.preventDefault(); 
         
-        setTimerState((currentState) => {
-          if (currentState === 'idle') {
-            setTime(0);
-            return 'ready';
-          }
-          if (currentState === 'solving') {
-            if (intervalRef.current) clearInterval(intervalRef.current);
-            return 'finished'; // Simply change the state here, do NOT save to DB yet
-          }
-          return currentState;
+        if (e.repeat) return; 
+        
+        setTimerState((prev) => {
+          if (prev === 'idle' || prev === 'finished') return 'ready';
+          if (prev === 'solving') return 'finished';
+          return prev;
         });
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
-        setTimerState((currentState) => {
-          if (currentState === 'ready') {
-            startTimeRef.current = Date.now();
-            intervalRef.current = setInterval(() => {
-              setTime(Date.now() - startTimeRef.current);
-            }, 10);
-            return 'solving';
-          }
-          if (currentState === 'finished') {
-            return 'idle';
-          }
-          return currentState;
+        setTimerState((prev) => {
+          if (prev === 'ready') return 'solving';
+          return prev;
         });
       }
     };
@@ -55,24 +40,33 @@ function App() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
-      if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, []);
 
-  // 2. Database Side-Effect Hook
   useEffect(() => {
-    if (timerState === 'finished') {
-      // Calculate exact final time using the ref to avoid stale closures
+    if (timerState === 'ready') {
+      setTime(0);
+    } 
+    else if (timerState === 'solving') {
+      startTimeRef.current = Date.now();
+      intervalRef.current = setInterval(() => {
+        setTime(Date.now() - startTimeRef.current);
+      }, 10);
+    } 
+    else if (timerState === 'finished') {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      
       const finalTime = Date.now() - startTimeRef.current;
       setTime(finalTime);
       
-      // Defensive check: only save if the bridge was successfully built
       if (window.api && window.api.saveSolve) {
         window.api.saveSolve(finalTime).catch(err => console.error("DB Save Failed:", err));
-      } else {
-        console.error("IPC Bridge is not connected!");
       }
     }
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [timerState]);
 
   const formatTime = (ms: number) => {
